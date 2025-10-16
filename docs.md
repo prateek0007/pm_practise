@@ -1,0 +1,1 @@
+jebać cie gościu c:

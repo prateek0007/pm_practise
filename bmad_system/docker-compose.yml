@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  bmad-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bmad-backend
+    env_file:
+      - .env
+    ports:
+      - "${DOCKER_BACKEND_PORT:-5006}:${BACKEND_CONTAINER_PORT:-5000}"
+      - "${DOCKER_ZROK_CONTROLLER_PORT:-18080}:18080"  # Zrok controller
+      - "${DOCKER_ZROK_FRONTEND_PORT:-8080}:8080"    # Zrok frontend (public access)
+    environment:
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - ZROK_API_ENDPOINT=${ZROK_API_ENDPOINT}
+      - ZROK_ACCOUNT_TOKEN=zroktoken
+      - ZROK_DNS_ZONE=cloudnsure.com
+      - ZROK_USER_EMAIL=varun@dekatc.com
+      - ZROK_USER_PWD=V@run9650
+      - ZITI_PWD=zitiadminpw
+      - ZROK_ADMIN_TOKEN=zroktoken
+    volumes:
+      - bmad_data:/tmp/bmad_output
+      - bmad_logs:/tmp/bmad_logs
+      - bmad_uploads:/tmp/bmad_uploads
+#      - ./bmad_backend/instance:/app/instance
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tmp:/etc/nginx
+      - ./gemini_config:/root/.gemini
+      - ./gemini_cli_config:/root/.config/gemini-cli
+    # networks:
+    #   - bmad-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:${BACKEND_CONTAINER_PORT:-5000}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: ["/start-bmad.sh"]
+
+  bmad-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_DEPLOYMENT_ENV: ${FLASK_ENV:-production}
+        VITE_BACKEND_HOST: ${BACKEND_HOST}
+        VITE_BACKEND_PORT: ${DOCKER_BACKEND_PORT}
+        VITE_BACKEND_URL: ${BACKEND_URL}
+        VITE_FRONTEND_HOST: ${FRONTEND_HOST}
+        VITE_FRONTEND_PORT: ${DOCKER_FRONTEND_PORT}
+        VITE_FRONTEND_URL: ${FRONTEND_URL}
+        VITE_API_BASE_URL: ${API_BASE_URL}
+    container_name: bmad-frontend
+    env_file:
+      - .env
+    ports:
+      - "${DOCKER_FRONTEND_PORT:-5005}:80"
+    depends_on:
+      - bmad-backend
+    # networks:
+    #   - bmad-network
+    restart: unless-stopped
+
+
+
+
+
+volumes:
+  bmad_data:
+    driver: local
+  bmad_logs:
+    driver: local
+  bmad_uploads:
+    driver: local
+
+
+# networks:
+#   bmad-network:
+#     driver: bridge
+

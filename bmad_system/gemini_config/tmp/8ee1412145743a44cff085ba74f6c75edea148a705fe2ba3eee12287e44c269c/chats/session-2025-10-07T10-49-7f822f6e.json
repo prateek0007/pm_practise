@@ -1,0 +1,30 @@
+{
+  "sessionId": "7f822f6e-6bfa-40e9-986b-538d65a6a791",
+  "projectHash": "8ee1412145743a44cff085ba74f6c75edea148a705fe2ba3eee12287e44c269c",
+  "startTime": "2025-10-07T10:49:38.479Z",
+  "lastUpdated": "2025-10-07T10:49:39.955Z",
+  "messages": [
+    {
+      "id": "a4aeb9c5-0ceb-423b-b7ed-fc480963ecb7",
+      "timestamp": "2025-10-07T10:49:38.480Z",
+      "type": "user",
+      "content": "HI"
+    },
+    {
+      "id": "e3fd8e7e-b868-4096-a7f7-7e7ba8d4a8ee",
+      "timestamp": "2025-10-07T10:49:39.955Z",
+      "type": "gemini",
+      "content": "Hello! How can I help you today?",
+      "thoughts": [],
+      "tokens": {
+        "input": 16314,
+        "output": 9,
+        "cached": 0,
+        "thoughts": 0,
+        "tool": 0,
+        "total": 16323
+      },
+      "model": "gemini-2.5-flash"
+    }
+  ]
+}

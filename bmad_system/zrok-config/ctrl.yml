@@ -1,0 +1,22 @@
+#    _____ __ ___ | | __
+#   |_  / '__/ _ \| |/ /
+#    / /| | | (_) |   <
+#   /___|_|  \___/|_|\_\
+# controller configuration
+
+v: 4
+admin:
+  secrets:
+    - "zroktoken123456789"
+endpoint:
+  host: 0.0.0.0
+  port: 18080
+invites:
+  invites_open: true
+store:
+  path: /var/lib/ziti/zrok.db
+  type: sqlite3
+ziti:
+  api_endpoint: "https://127.0.0.1:1280"
+  username: "admin"
+  password: "zitiadminpw"

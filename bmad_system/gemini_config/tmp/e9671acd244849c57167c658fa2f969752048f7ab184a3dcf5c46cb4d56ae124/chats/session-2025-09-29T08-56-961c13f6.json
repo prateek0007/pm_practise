@@ -1,0 +1,36 @@
+{
+  "sessionId": "961c13f6-2ca2-4122-8f58-5bbfb1e8cb9e",
+  "projectHash": "e9671acd244849c57167c658fa2f969752048f7ab184a3dcf5c46cb4d56ae124",
+  "startTime": "2025-09-29T08:56:12.022Z",
+  "lastUpdated": "2025-09-29T08:56:21.286Z",
+  "messages": [
+    {
+      "id": "f49f427d-f0f0-42d7-9562-54264746e83c",
+      "timestamp": "2025-09-29T08:56:12.022Z",
+      "type": "user",
+      "content": "hi"
+    },
+    {
+      "id": "540a599e-6786-45a8-98cb-41ab3062a584",
+      "timestamp": "2025-09-29T08:56:21.286Z",
+      "type": "gemini",
+      "content": "Hello there! How can I help you today?",
+      "thoughts": [
+        {
+          "subject": "Responding to a Query",
+          "description": "I've registered the user's initial greeting. My plan is to respond with a friendly \"Hello there!\" and follow that up with \"How can I help you today?\". The goal is to acknowledge the user and proactively offer assistance.",
+          "timestamp": "2025-09-29T08:56:21.231Z"
+        }
+      ],
+      "tokens": {
+        "input": 17417,
+        "output": 9,
+        "cached": 0,
+        "thoughts": 33,
+        "tool": 0,
+        "total": 17459
+      },
+      "model": "gemini-2.5-pro"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "gitea": {
+      "url": "http://157.66.191.31:4000/sse"
+    },
+    "io8": {
+      "url": "http://157.66.191.31:4001/sse"
+    },
+    "flf": {
+      "url": "http://157.66.191.31:4002/sse"
+    }
+  },
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
+}

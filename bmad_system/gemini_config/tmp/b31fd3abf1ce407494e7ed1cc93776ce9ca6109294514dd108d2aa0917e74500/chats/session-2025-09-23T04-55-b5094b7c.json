@@ -1,0 +1,14 @@
+{
+  "sessionId": "b5094b7c-81e5-463e-a9ab-a56d7cbf9f71",
+  "projectHash": "b31fd3abf1ce407494e7ed1cc93776ce9ca6109294514dd108d2aa0917e74500",
+  "startTime": "2025-09-23T04:55:39.896Z",
+  "lastUpdated": "2025-09-23T04:55:39.896Z",
+  "messages": [
+    {
+      "id": "ecf47b72-0e67-466d-8ea4-485af98da61a",
+      "timestamp": "2025-09-23T04:55:39.896Z",
+      "type": "user",
+      "content": "Write this command to below is just an wireframe creation example but you need to create wireframe based on the user prompt`.sureai/io8_mcp/requests/create_wireframe.txt` and execute it:\n```\ngemini yolo command with this as prompt \"create_wireframe_raw(moduleId='[MODULE_ID_FROM_PROJECT_RESPONSE]', backendId='[BACKEND_ID_FROM_PROJECT_RESPONSE]', jsonString='{\\\"wireframeName\\\":\\\"[WIREFRAME_NAME]\\\",\\\"fields\\\":[{\\\"name\\\":\\\"Name\\\",\\\"type\\\":\\\"text\\\"},{\\\"name\\\":\\\"Email\\\",\\\"type\\\":\\\"email\\\"},{\\\"name\\\":\\\"Age\\\",\\\"type\\\":\\\"number\\\"}]}')\"\n\nNow from the create_project.out pick the backendResp id value and moduleResp id value for creating writeframe as per the user prompt. Refer the architecture document for user prompt updated document for creating the wireframe above is an example and using io8 mcp tool create_wireframe_raw save the response in json to `io8_mcp/responses/create_wireframe.out`\n\nuser prompt: To-Do app"
+    }
+  ]
+}

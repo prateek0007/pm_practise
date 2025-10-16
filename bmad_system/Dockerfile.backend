@@ -1,0 +1,161 @@
+# Dockerfile for BMAD Backend
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies and Node.js for Gemini CLI
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libffi-dev \
+    libssl-dev \
+    tesseract-ocr \
+    curl \
+    tree \
+    nano \
+    less \
+    vim \
+    git \
+    wget \
+    unzip \
+    rsync \
+    jq \
+    xvfb \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce docker-ce-cli containerd.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20 for Gemini CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+
+# Install node-gyp to avoid conflicts
+RUN npm install -g node-gyp
+
+# Install Gemini CLI globally with specific version
+RUN npm install -g @google/gemini-cli@latest --legacy-peer-deps
+
+# Install LLXPRT CLI (multi-provider fork of gemini-cli)
+RUN npm install -g @vybestack/llxprt-code@latest --legacy-peer-deps
+
+# Install Chrome and ChromeDriver for Selenium testing
+RUN apt-get update && apt-get install -y gnupg ca-certificates \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-linux-signing-key.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux-signing-key.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ChromeDriver with fixed version for stability
+RUN wget -O /tmp/chromedriver.zip "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/120.0.6099.109/linux64/chromedriver-linux64.zip" \
+    && unzip /tmp/chromedriver.zip -d /tmp/ \
+    && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/ \
+    && chmod +x /usr/local/bin/chromedriver \
+    && rm -rf /tmp/chromedriver.zip /tmp/chromedriver-linux64
+
+# Copy requirements first for better caching
+COPY bmad_backend/requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install required dependencies for OpenZiti and zrok
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    jq \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenZiti CLI (not the full controller package)
+RUN curl -sSLf https://get.openziti.io/install.bash | bash -s openziti
+
+# Install zrok CLI
+RUN cd /tmp && \
+    ZROK_VERSION=$(curl -sSf https://api.github.com/repos/openziti/zrok/releases/latest | jq -r '.tag_name') && \
+    curl -sSfL "https://github.com/openziti/zrok/releases/download/${ZROK_VERSION}/zrok_${ZROK_VERSION#v}_linux_amd64.tar.gz" | tar -xz && \
+    install -o root -g root ./zrok /usr/local/bin/ && \
+    rm -f ./zrok
+
+# Create directories for configurations
+RUN mkdir -p /etc/zrok /opt/openziti /var/lib/ziti /var/log/ziti
+
+# Create supervisor configuration directory
+RUN mkdir -p /etc/supervisor/conf.d
+
+# Copy application code
+COPY bmad_backend/ .
+
+# Copy zrok configuration files
+COPY zrok-config/ /etc/zrok/
+COPY zrok-config/supervisord.conf /etc/supervisor/conf.d/
+
+# Copy zrok setup scripts and make them executable
+COPY zrok-config/setup-openziti.sh /setup-openziti.sh
+COPY zrok-config/start-ziti-controller.sh /start-ziti-controller.sh
+COPY zrok-config/start-ziti-router.sh /start-ziti-router.sh
+COPY zrok-config/setup-zrok.sh /setup-zrok.sh
+COPY zrok-config/start-zrok-frontend.sh /start-zrok-frontend.sh
+COPY zrok-config/start-bmad-with-zrok.sh /start-bmad-with-zrok.sh
+COPY zrok-config/start-bmad.sh /start-bmad.sh
+
+# Make all scripts executable
+RUN chmod +x /setup-openziti.sh \
+    && chmod +x /start-ziti-controller.sh \
+    && chmod +x /start-ziti-router.sh \
+    && chmod +x /setup-zrok.sh \
+    && chmod +x /start-zrok-frontend.sh \
+    && chmod +x /start-bmad-with-zrok.sh \
+    && chmod +x /start-bmad.sh
+
+# Normalize line endings to avoid CRLF issues causing "no such file or directory"
+RUN sed -i 's/\r$//' /start-bmad.sh \
+    && sed -i 's/\r$//' /start-bmad-with-zrok.sh \
+    && sed -i 's/\r$//' /setup-openziti.sh \
+    && sed -i 's/\r$//' /start-ziti-controller.sh \
+    && sed -i 's/\r$//' /start-ziti-router.sh \
+    && sed -i 's/\r$//' /setup-zrok.sh \
+    && sed -i 's/\r$//' /start-zrok-frontend.sh
+
+# Make test script executable
+RUN chmod +x test_selenium.py
+
+# Create necessary directories
+RUN mkdir -p /tmp/bmad_logs /tmp/bmad_output /tmp/bmad_backups /tmp/bmad_uploads
+
+# Set environment variables
+ENV FLASK_APP=src/main.py
+ENV FLASK_ENV=production
+ENV PYTHONPATH=/app
+
+# Selenium environment variables for headless mode
+ENV DISPLAY=:99
+ENV CHROME_BIN=/usr/bin/google-chrome
+ENV CHROME_DRIVER_PATH=/usr/local/bin/chromedriver
+
+# Set environment variables for zrok
+ENV ZROK_API_ENDPOINT=http://127.0.0.1:18080
+ENV ZROK_ADMIN_TOKEN=zroktoken123456789
+
+# Verify Chrome and ChromeDriver installation
+RUN google-chrome --version && chromedriver --version
+
+# Verify Docker installation
+RUN docker --version
+
+# Expose ports for all services
+EXPOSE 5000 18080 8080 1280 3022
+
+# Use the modularized startup script
+CMD ["/start-bmad.sh"]
+

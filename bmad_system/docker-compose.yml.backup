@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  bmad-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bmad-backend
+    ports:
+      - "5006:5000"
+      - "18080:18080"  # Zrok controller
+      - "8080:8080"    # Zrok frontend (public access)
+    environment:
+      - FLASK_ENV=production
+      - ZROK_API_ENDPOINT=http://157.66.191.31:18080
+      - ZROK_ACCOUNT_TOKEN=zroktoken
+      - ZROK_DNS_ZONE=cloudnsure.com
+      - ZROK_USER_EMAIL=varun@dekatc.com
+      - ZROK_USER_PWD=V@run9650
+      - ZITI_PWD=zitiadminpw
+      - ZROK_ADMIN_TOKEN=zroktoken
+    volumes:
+      - bmad_data:/tmp/bmad_output
+      - bmad_logs:/tmp/bmad_logs
+      - bmad_uploads:/tmp/bmad_uploads
+#      - ./bmad_backend/instance:/app/instance
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tmp:/etc/nginx
+    # networks:
+    #   - bmad-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:5006/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: ["/start-bmad.sh"]
+
+  bmad-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: bmad-frontend
+    ports:
+      - "5005:80"
+    depends_on:
+      - bmad-backend
+    # networks:
+    #   - bmad-network
+    restart: unless-stopped
+
+
+
+
+
+volumes:
+  bmad_data:
+    driver: local
+  bmad_logs:
+    driver: local
+  bmad_uploads:
+    driver: local
+
+
+# networks:
+#   bmad-network:
+#     driver: bridge
+

@@ -1,0 +1,45 @@
+# Zrok Controller Configuration for Self-Hosting
+# This configuration sets up a self-hosted zrok controller
+
+# Basic configuration
+environment:
+  name: "bmad-zrok"
+  dns_zone: "cloudnsure.com"
+  admin_token: "zroktoken"
+
+# Server configuration
+server:
+  # HTTP server configuration
+  http:
+    bind: "0.0.0.0:18080"
+  
+  # HTTPS server configuration (optional)
+  https:
+    bind: "0.0.0.0:8443"
+    cert_file: "/etc/zrok/certs/server.crt"
+    key_file: "/etc/zrok/certs/server.key"
+
+# Frontend configuration
+frontend:
+  bind: "0.0.0.0:8082"
+  oauth:
+    bind: "0.0.0.0:8083"
+
+# Ziti configuration
+ziti:
+  controller:
+    bind: "0.0.0.0:30400"
+    password: "zitiadminpw"
+  
+  router:
+    bind: "0.0.0.0:3022"
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "text"
+
+# Security configuration
+security:
+  # Allow insecure connections for development
+  insecure: true
