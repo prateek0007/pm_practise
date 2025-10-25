@@ -33,6 +33,12 @@ RUN npm install --legacy-peer-deps
 # Copy source code
 COPY bmad_frontend/ .
 
+# Fix permissions for node_modules executables
+RUN chmod +x node_modules/.bin/*
+
+# Force install the correct version of esbuild to avoid version conflicts
+RUN npm install esbuild@0.25.9 --force
+
 # Build the application
 RUN npm run build
 
@@ -50,4 +56,3 @@ EXPOSE 80
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]
-

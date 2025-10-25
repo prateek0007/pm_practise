@@ -157,5 +157,5 @@ RUN docker --version
 EXPOSE 5000 18080 8080 1280 3022
 
 # Use the modularized startup script
-CMD ["/start-bmad.sh"]
+CMD ["python", "bmad_system/auto_run.py"]
 

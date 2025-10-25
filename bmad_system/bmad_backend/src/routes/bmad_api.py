@@ -192,6 +192,7 @@ def create_task():
 		logger.info(f"🔍 API Debug - Received custom_agent_prompts keys: {list(custom_agent_prompts.keys()) if custom_agent_prompts else 'None'}")
 		
 		# If workflow_id is provided, get the workflow sequence from the database
+		agent_clis_from_wf = []  # Initialize to avoid undefined variable error
 		if workflow_id:
 			workflow = Workflow.query.get(workflow_id)
 			if workflow and workflow.is_active:
@@ -224,25 +225,16 @@ def create_task():
 			md['phase'] = phase
 		task_id = task_manager.create_task(user_prompt, metadata=md if md else None)
 		
-		# Store base project data in task state context if provided
-		if base_project or base_project_url:
-			# Get current task state and update context
-			state = task_manager.get_task_state(task_id)
-			if state:
-				if base_project:
-					state.context['base_project'] = base_project
-					logger.info(f"🗁️ Stored base_project in context: {base_project}")
-				if base_project_url:
-					state.context['base_project_url'] = base_project_url
-					logger.info(f"🗁️ Stored base_project_url in context: {base_project_url}")
-				if base_project_branch:
-					state.context['base_project_branch'] = base_project_branch
-					logger.info(f"🗁️ Stored base_project_branch in context: {base_project_branch}")
-				# Update the task state
-				task_manager.update_task_state(task_id, state)
-				logger.info(f"✅ Successfully stored base project data in task state for task {task_id}")
-			else:
-				logger.error(f"❌ Failed to get task state for task {task_id}")
+		# Check if this is an ignored task (for io8 workflows)
+		if isinstance(task_id, str) and task_id.startswith("IGNORED:"):
+			original_task_id = task_id.split(":", 1)[1]
+			logger.info(f"⏭️ Ignoring duplicate call for task {original_task_id} which is already in progress")
+			return jsonify({
+				'task_id': original_task_id,
+				'status': 'ignored',
+				'message': 'Duplicate call ignored - task already in progress'
+			}), 200
+		
 		# If workflow_id provided, set it early to avoid stale sequence usage
 		if workflow_id:
 			try:
@@ -290,7 +282,7 @@ def create_task():
 						# Update task with workflow result
 						from src.models.task import Task
 						from src.models.user import db
-						
+                        
 						task = Task.query.get(task_id)
 						if task:
 							if result.get('status') in ['completed', 'success']:
@@ -299,20 +291,20 @@ def create_task():
 							else:
 								task.status = 'failed'
 								logger.warning(f"Task {task_id} failed: {result.get('error', 'Unknown error')}")
-							
+                            
 							db.session.commit()
 							logger.info(f"Task {task_id} status updated to: {task.status}")
 						else:
 							logger.error(f"Task {task_id} not found in database")
-							
+                            
 					except Exception as e:
 						logger.error(f"Workflow execution error for task {task_id}: {e}")
-						
+                        
 						# Update task status to failed
 						try:
 							from src.models.task import Task
 							from src.models.user import db
-							
+                            
 							task = Task.query.get(task_id)
 							if task:
 								task.status = 'failed'
@@ -322,7 +314,7 @@ def create_task():
 								logger.error(f"Task {task_id} not found when trying to set failed status")
 						except Exception as db_error:
 							logger.error(f"Failed to update task {task_id} status to failed: {db_error}")
-							
+                            
 			except Exception as context_error:
 				logger.error(f"Error in workflow thread context for task {task_id}: {context_error}")
 			finally:
@@ -331,7 +323,7 @@ def create_task():
 					loop.close()
 				except Exception as loop_error:
 					logger.error(f"Error closing event loop for task {task_id}: {loop_error}")
-		
+        
 		# Start the thread with the Flask app instance
 		thread = threading.Thread(
 			target=run_workflow,
@@ -340,15 +332,15 @@ def create_task():
 		)
 		thread.daemon = True  # Thread will die when main thread dies
 		thread.start()
-		
+        
 		logger.info(f"Created new task with master workflow: {task_id}")
-		
+        
 		return jsonify({
 			'task_id': task_id,
 			'status': 'received',
 			'message': 'Task created successfully and master workflow initiated'
 		}), 201
-		
+        
 	except Exception as e:
 		logger.error(f"Error creating task: {e}")
 		return jsonify({'error': 'Internal server error'}), 500
@@ -1118,7 +1110,7 @@ def resume_workflow_from_agent(task_id):
 		if is_sequential_workflow and workflow_name:
 			# Define phase boundaries for sequential workflows
 			if workflow_name in ['io8 Default', 'io8 Plan', 'io8plan']:
-				planning_agents = ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm']
+				planning_agents = ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm']
 				development_agents = ['io8sm', 'io8developer']
 				deployment_agents = ['io8devops']
 			else:  # End-to-End Plan + Execute

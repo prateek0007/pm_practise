@@ -9,7 +9,7 @@ state management.
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -63,7 +63,7 @@ class TaskManager:
             # DB might not be initialized yet; ignore
             pass
     
-    def create_task(self, prompt: str, files: List[str] = None, metadata: Dict[str, Any] = None) -> str:
+    def create_task(self, prompt: str, files: Optional[List[str]] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
         """
         Create a new task and return the task ID
         
@@ -76,6 +76,95 @@ class TaskManager:
             Task ID string
         """
         task_id = str(uuid.uuid4())
+
+        # Check if there's an existing task with the same workflow_id and prompt that is still in progress
+        # This prevents multiple task creations for the same workflow execution
+        try:
+            if isinstance(metadata, dict) and metadata.get('workflow_id'):
+                wf_id = metadata.get('workflow_id')
+                # Normalize the prompt for comparison
+                normalized_prompt = (prompt or '').strip()
+                
+                # Check if this is an io8 workflow
+                is_io8_workflow = False
+                try:
+                    from src.models.workflow import Workflow
+                    workflow = Workflow.query.get(wf_id)
+                    if workflow and 'io8' in workflow.name.lower():
+                        is_io8_workflow = True
+                        logger.info(f"🔍 Task reuse check - Identified as io8 workflow: {workflow.name}")
+                except Exception as e:
+                    logger.warning(f"Could not determine workflow type: {e}")
+                
+                # For io8 workflows, we want to reuse tasks even if they failed or were cancelled, 
+                # as they're part of the same workflow execution
+                if is_io8_workflow:
+                    logger.info(f"🔍 Task reuse check - Looking for existing tasks with workflow_id: {wf_id}, prompt: '{normalized_prompt}'")
+                    
+                    # Only consider tasks created within the last 5 minutes to avoid reusing very old tasks
+                    five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+                    
+                    # First, get all tasks with the same workflow_id within the time window
+                    all_workflow_tasks = (
+                        db.session.query(Task)
+                        .filter(Task.workflow_id == wf_id)
+                        .filter(Task.created_at >= five_minutes_ago)
+                        .order_by(Task.created_at.desc())
+                        .all()
+                    )
+                    
+                    logger.info(f"🔍 Task reuse check - Found {len(all_workflow_tasks)} tasks with workflow_id {wf_id} within last 5 minutes")
+                    
+                    # Filter tasks with matching prompts
+                    matching_tasks = []
+                    for task in all_workflow_tasks:
+                        task_prompt = (task.user_prompt or '').strip()
+                        logger.info(f"🔍 Task reuse check - Comparing prompts: '{normalized_prompt}' vs '{task_prompt}' for task {task.id}")
+                        if task_prompt == normalized_prompt:
+                            matching_tasks.append(task)
+                    
+                    # Log debugging information
+                    logger.info(f"🔍 Task reuse check - Found {len(matching_tasks)} tasks with matching prompts")
+                    for task in matching_tasks:
+                        logger.info(f"🔍 Task reuse check - Matching task {task.id} with status: {task.status}, created_at: {task.created_at}")
+                    
+                    if matching_tasks:
+                        # Use the most recent task instead of creating a new one
+                        existing_task_id = matching_tasks[0].id
+                        logger.info(f"🔄 Found existing task {existing_task_id} for workflow_id {wf_id} with same prompt, reusing it")
+                        
+                        # For io8 workflows, we want to ensure that only the third call (the correct one) proceeds
+                        # Check if this is a duplicate call that should be ignored
+                        existing_task = matching_tasks[0]
+                        if existing_task.status in ['received', 'in_progress']:
+                            logger.info(f"⏭️ Ignoring duplicate call for task {existing_task_id} which is already in progress")
+                            # Return the existing task ID but indicate this call should be ignored
+                            return f"IGNORED:{str(existing_task_id)}"
+                        else:
+                            return str(existing_task_id)
+                    else:
+                        logger.info(f"🔍 Task reuse check - No matching tasks found, creating new task")
+                else:
+                    # For non-io8 workflows, use the original logic
+                    # Find tasks with same workflow_id and prompt that are still in progress
+                    existing_tasks = (
+                        db.session.query(Task)
+                        .filter(Task.workflow_id == wf_id)
+                        .filter(Task.user_prompt == prompt)
+                        .filter(Task.status.in_(['received', 'in_progress']))
+                        .order_by(Task.created_at.desc())
+                        .all()
+                    )
+                    
+                    if existing_tasks:
+                        # Use the most recent in-progress task instead of creating a new one
+                        existing_task_id = existing_tasks[0].id
+                        logger.info(f"🔄 Found existing in-progress task {existing_task_id} for workflow_id {wf_id} with same prompt, reusing it")
+                        return str(existing_task_id)
+            else:
+                logger.info("🔍 Task reuse check - No workflow_id provided, skipping task reuse check")
+        except Exception as e:
+            logger.warning(f"Error checking for existing tasks: {e}")
 
         # Reuse existing project directory for same workflow (planning → execution)
         reuse_project_path: Optional[str] = None
@@ -96,38 +185,44 @@ class TaskManager:
                     logger.info(f"📝 Previous prompt: '{prev.user_prompt}'")
                     logger.info(f"📝 Current prompt: '{prompt}'")
                     
-                if prev and prev.project_path and os.path.exists(prev.project_path):
-                    # For io8 workflows, always reuse the folder for subworkflows
-                    try:
-                        if (prev.user_prompt or '').strip().lower() == (prompt or '').strip().lower():
-                            reuse_project_path = prev.project_path
-                            logger.info(f"✅ Reusing project path due to matching prompts: {reuse_project_path}")
-                        else:
-                            # Check if this is a subworkflow continuation (different task ID but same workflow)
-                            # For io8 workflows, reuse even with different prompts if same workflow
-                            try:
-                                from src.models.workflow import Workflow
-                                workflow = Workflow.query.get(wf_id)
-                                if workflow and 'io8' in workflow.name.lower():
-                                    reuse_project_path = prev.project_path
-                                    logger.info(f"✅ Reusing project path for io8 subworkflow: {reuse_project_path}")
-                                else:
-                                    logger.info(f"⏭️ Not reusing path - different prompts and not io8 workflow")
-                            except Exception as wf_err:
-                                logger.warning(f"Could not check workflow type: {wf_err}")
-                                # Fallback to prompt comparison
-                                reuse_project_path = prev.project_path
-                                logger.info(f"✅ Reusing project path as fallback: {reuse_project_path}")
-                    except Exception:
-                        reuse_project_path = prev.project_path
-                        logger.info(f"✅ Reusing project path (exception fallback): {reuse_project_path}")
+                # Handle SQLAlchemy column types properly
+                if prev is not None:
+                    # Convert SQLAlchemy columns to strings safely
+                    prev_project_path = str(getattr(prev, 'project_path')) if getattr(prev, 'project_path') else None
+                    prev_user_prompt = str(getattr(prev, 'user_prompt')) if getattr(prev, 'user_prompt') else ''
+                    
+                    if prev_project_path and os.path.exists(prev_project_path):
+                        # For io8 workflows, always reuse the folder for subworkflows
+                        try:
+                            if prev_user_prompt.strip().lower() == (prompt or '').strip().lower():
+                                reuse_project_path = prev_project_path
+                                logger.info(f"✅ Reusing project path due to matching prompts: {reuse_project_path}")
+                            else:
+                                # Check if this is a subworkflow continuation (different task ID but same workflow)
+                                # For io8 workflows, reuse even with different prompts if same workflow
+                                try:
+                                    from src.models.workflow import Workflow
+                                    workflow = Workflow.query.get(wf_id)
+                                    if workflow and 'io8' in workflow.name.lower():
+                                        reuse_project_path = prev_project_path
+                                        logger.info(f"✅ Reusing project path for io8 subworkflow: {reuse_project_path}")
+                                    else:
+                                        logger.info(f"⏭️ Not reusing path - different prompts and not io8 workflow")
+                                except Exception as wf_err:
+                                    logger.warning(f"Could not check workflow type: {wf_err}")
+                                    # Fallback to prompt comparison
+                                    reuse_project_path = prev_project_path
+                                    logger.info(f"✅ Reusing project path as fallback: {reuse_project_path}")
+                        except Exception:
+                            reuse_project_path = prev_project_path
+                            logger.info(f"✅ Reusing project path (exception fallback): {reuse_project_path}")
+                    else:
+                        if not prev_project_path:
+                            logger.info(f"ℹ️ Previous task has no project_path")
+                        elif not os.path.exists(prev_project_path):
+                            logger.info(f"ℹ️ Previous project path does not exist: {prev_project_path}")
                 else:
-                    if not prev:
-                        logger.info(f"ℹ️ No previous task found for workflow_id {wf_id}")
-                    elif not prev.project_path:
-                        logger.info(f"ℹ️ Previous task has no project_path")
-                    elif not os.path.exists(prev.project_path):
-                        logger.info(f"ℹ️ Previous project path does not exist: {prev.project_path}")
+                    logger.info(f"ℹ️ No previous task found for workflow_id {wf_id}")
         except Exception as e:
             logger.warning(f"Error checking for reusable project path: {e}")
             reuse_project_path = None
@@ -167,6 +262,9 @@ class TaskManager:
         # Create enhanced directory structure only when not reusing an existing project
         if not reuse_project_path:
             self._create_project_directory_structure(project_path)
+        else:
+            # Even when reusing a project, ensure the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file exists
+            self._ensure_universal_field_analysis_context(project_path)
         
         # Create .io8project directory
         io8_project_path = os.path.join(project_path, ".io8project")
@@ -214,16 +312,22 @@ class TaskManager:
         }
         
         # Save to database
-        task = Task(
-            id=task_id,
-            user_prompt=prompt,
-            status=TaskStatus.RECEIVED.value,
-            project_path=project_path,
-            current_agent=initial_current_agent,
-            progress_percentage=0,
-            state_json=json.dumps(asdict(initial_state)),
-            memory_json=json.dumps(initial_memory)
-        )
+        task_data = {
+            'id': task_id,
+            'user_prompt': prompt,
+            'status': TaskStatus.RECEIVED.value,
+            'project_path': project_path,
+            'current_agent': initial_current_agent,
+            'progress_percentage': 0,
+            'state_json': json.dumps(asdict(initial_state)),
+            'memory_json': json.dumps(initial_memory)
+        }
+        
+        # Add workflow_id if present in metadata
+        if isinstance(metadata, dict) and metadata.get('workflow_id'):
+            task_data['workflow_id'] = metadata.get('workflow_id')
+        
+        task = Task(**task_data)
         
         db.session.add(task)
         db.session.commit()
@@ -244,6 +348,100 @@ class TaskManager:
         
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
+        
+        # Copy the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file to the task's .sureai directory
+        self._copy_universal_field_analysis_context(project_path)
+    
+    def _ensure_universal_field_analysis_context(self, project_path: str):
+        """Ensure the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file exists in the project's .sureai directory"""
+        dest_context_file = os.path.join(project_path, ".sureai", "UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md")
+        
+        # Check if the file already exists and contains real content
+        if os.path.exists(dest_context_file):
+            try:
+                with open(dest_context_file, 'r', encoding='utf-8') as f:
+                    content = f.read(200)  # Read only first 200 chars to check
+                    if "placeholder file" not in content:
+                        # File exists and contains real content, no need to copy
+                        return
+            except Exception as read_err:
+                logger.warning(f"Could not verify existing file content: {read_err}")
+        
+        # File doesn't exist or is a placeholder, copy it
+        self._copy_universal_field_analysis_context(project_path)
+    
+    def _copy_universal_field_analysis_context(self, project_path: str):
+        """Copy the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file to the task's .sureai directory"""
+        # This is required by the FLF agent to reference the context guide
+        try:
+            dest_context_file = os.path.join(project_path, ".sureai", "UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md")
+            
+            # In Docker container, the source file should be at a known location
+            # No need to search multiple paths - use the correct source path directly
+            source_context_file = None
+            
+            # According to user feedback, we know exactly where the file will be in Docker
+            # It will be under .sureai directory of the newly created folder under bmad_output
+            # So we can directly copy from the source location to the destination
+            # First check the Docker container path
+            docker_source_path = "/app/.sureai/UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md"
+            # Also check the development environment path
+            workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+            dev_source_path = os.path.join(workspace_root, ".sureai", "UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md")
+            
+            # Check if the source file exists in either location
+            source_context_file = None
+            if os.path.exists(docker_source_path):
+                source_context_file = docker_source_path
+                logger.info(f"Found UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md at known Docker location: {docker_source_path}")
+            elif os.path.exists(dev_source_path):
+                source_context_file = dev_source_path
+                logger.info(f"Found UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md at development location: {dev_source_path}")
+            else:
+                # Try to find the file in the current workspace
+                current_file_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                workspace_source_path = os.path.join(current_file_path, "..", ".sureai", "UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md")
+                workspace_source_path = os.path.abspath(workspace_source_path)
+                if os.path.exists(workspace_source_path):
+                    source_context_file = workspace_source_path
+                    logger.info(f"Found UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md at workspace location: {workspace_source_path}")
+                else:
+                    logger.warning(f"UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md not found at any expected location. Docker: {docker_source_path}, Dev: {dev_source_path}, Workspace: {workspace_source_path}")
+            
+            # Copy the file if found
+            if source_context_file and os.path.exists(source_context_file):
+                import shutil
+                shutil.copy2(source_context_file, dest_context_file)
+                logger.info(f"Successfully copied UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md from {source_context_file} to {dest_context_file}")
+                
+                # Verify the copied file is not a placeholder
+                try:
+                    with open(dest_context_file, 'r', encoding='utf-8') as f:
+                        content = f.read(200)  # Read only first 200 chars to check
+                        if "placeholder file" in content.lower():
+                            logger.warning(f"Warning: Copied file appears to be a placeholder: {dest_context_file}")
+                        else:
+                            logger.info(f"Verified copied file contains real content: {dest_context_file}")
+                except Exception as read_err:
+                    logger.warning(f"Could not verify copied file content: {read_err}")
+            else:
+                logger.error("UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md not found in expected locations")
+                
+                # Create an empty file as a fallback so the agent doesn't fail
+                logger.warning("Creating empty placeholder file as fallback")
+                with open(dest_context_file, 'w') as f:
+                    f.write("# Universal Field Analysis Context Guide\n\nThis is a placeholder file. The actual context guide was not found during task initialization.\n")
+                logger.info(f"Created placeholder file at {dest_context_file}")
+        except Exception as e:
+            logger.error(f"Error copying UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md: {e}")
+            # Create an empty file as a fallback so the agent doesn't fail
+            try:
+                dest_context_file = os.path.join(project_path, ".sureai", "UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md")
+                with open(dest_context_file, 'w') as f:
+                    f.write("# Universal Field Analysis Context Guide\n\nThis is a placeholder file. An error occurred during file copying: " + str(e) + "\n")
+                logger.info(f"Created error placeholder file at {dest_context_file}")
+            except Exception as fallback_err:
+                logger.error(f"Failed to create fallback file: {fallback_err}")
     
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task information by ID"""
@@ -253,8 +451,8 @@ class TaskManager:
         return None
     
     def update_task_status(self, task_id: str, status: TaskStatus, 
-                          current_agent: str = None, progress: float = None,
-                          error_message: str = None) -> bool:
+                          current_agent: Optional[str] = None, progress: Optional[float] = None,
+                          error_message: Optional[str] = None) -> bool:
         """Update task status and related information"""
         task = Task.query.get(task_id)
         if not task:
@@ -348,6 +546,8 @@ class TaskManager:
                 os.makedirs(project_path, exist_ok=True)
                 # Create structure and state folder
                 self._create_project_directory_structure(project_path)
+                # Ensure the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file exists
+                self._ensure_universal_field_analysis_context(project_path)
                 io8_project_path = os.path.join(project_path, ".io8project")
                 os.makedirs(io8_project_path, exist_ok=True)
                 # Persist minimal state if available
@@ -371,6 +571,8 @@ class TaskManager:
             os.makedirs(project_path, exist_ok=True)
             # Create structure and state folder
             self._create_project_directory_structure(project_path)
+            # Ensure the UNIVERSAL_FIELD_ANALYSIS_CONTEXT.md file exists
+            self._ensure_universal_field_analysis_context(project_path)
             io8_project_path = os.path.join(project_path, ".io8project")
             os.makedirs(io8_project_path, exist_ok=True)
             # Update DB
@@ -567,4 +769,3 @@ class TaskManager:
         task.updated_at = datetime.utcnow()
         db.session.commit()
         return True
-

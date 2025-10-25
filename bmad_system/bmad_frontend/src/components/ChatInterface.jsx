@@ -171,7 +171,7 @@ const ChatInterface = ({
       
       if (isIo8) {
         // io8 Default: 3 subworkflows
-        const wf1 = { name: 'io8 Plan (SureCLI)', seq: ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'] };
+        const wf1 = { name: 'io8 Plan (SureCLI)', seq: ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'] };
         const wf2 = { name: 'io8 Develop (Gemini)', seq: ['io8sm', 'io8developer'] };
         const wf3 = { name: 'io8 Deploy (Gemini)', seq: ['io8devops'] };
         const synthetic = [wf1, wf2, wf3];
@@ -626,7 +626,7 @@ const ChatInterface = ({
     const projectName = getProjectFolderName();
     if (!projectName) { showNotification('Folder name unavailable yet', 'error'); return; }
     await ensureRepoIfMissing();
-    const io8Prompt = `process_user_prompt(userPrompt='create io8 project with project name "${projectName}", visibility "Private", backend "Spring Boot", database "MySQL", and frontend "Angular Clarity"')`;
+    const io8Prompt = `process_user_prompt(userPrompt='create io8 project with project name "${projectName}", visibility "Public", backend "Spring Boot", database "MySQL", and frontend "Angular Clarity"')`;
     let ok = false;
     try {
       const res = await fetch(`${API_BASE_URL}/tasks/${task.task_id}/gemini/single`, {

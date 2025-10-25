@@ -998,8 +998,8 @@ export default function WorkflowManager({ agents, onWorkflowSelect }) {
         })
       });
 
-      // New io8 Workflow 1: io8 Plan (SureCLI) with io8project_builder first (Gemini CLI for this agent only)
-      const io8Wf1Agents = ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'];
+      // New io8 Workflow 1: io8 Plan (SureCLI) with io8_mcp_project first (Gemini CLI for this agent only)
+      const io8Wf1Agents = ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'];
       const io8Wf1Clis = io8Wf1Agents.map((a, i) => (i === 0 ? 'gemini' : 'surecli'));
       await fetch(`${API_BASE_URL}/workflows`, {
         method: 'POST',
@@ -1103,7 +1103,7 @@ export default function WorkflowManager({ agents, onWorkflowSelect }) {
     const origWf3Agents = [...origWf1Agents, ...origWf2Agents];
     const origWf3Clis = [...origWf1Clis, ...origWf2Clis];
 
-    const io8Wf1Agents = ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'];
+    const io8Wf1Agents = ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'];
     const io8Wf1Clis = io8Wf1Agents.map((a, i) => (i === 0 ? 'gemini' : 'surecli'));
     const io8Wf2Agents = ['io8sm', 'io8developer'];
     const io8Wf2Clis = io8Wf2Agents.map(() => 'gemini');

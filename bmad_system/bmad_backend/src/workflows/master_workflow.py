@@ -135,8 +135,8 @@ class MasterWorkflow:
         """Clear CLI logs"""
         self.cli_logs = []
     
-    async def execute_workflow(self, task_id: str, user_prompt: str, workflow_sequence: List[str] = None, 
-                             custom_prompts: Dict[str, str] = None, per_agent_models: List[str] = None, per_agent_temperatures: List[Optional[float]] = None, per_agent_clis: List[str] = None, workflow_id: str = None):
+    async def execute_workflow(self, task_id: str, user_prompt: str, workflow_sequence: Optional[List[str]] = None, 
+                             custom_prompts: Optional[Dict[str, str]] = None, per_agent_models: Optional[List[str]] = None, per_agent_temperatures: Optional[List[Optional[float]]] = None, per_agent_clis: Optional[List[str]] = None, workflow_id: Optional[str] = None):
         """
         Execute the master workflow for a given task
         
@@ -151,6 +151,12 @@ class MasterWorkflow:
         Returns:
             Dict containing workflow execution results
         """
+        # Check if this is an ignored task (for io8 workflows)
+        if task_id.startswith("IGNORED:"):
+            original_task_id = task_id.split(":", 1)[1]
+            self._handle_cli_log("INFO", f"⏭️ Ignoring duplicate call for task {original_task_id} which is already in progress")
+            return {'status': 'ignored', 'message': 'Duplicate call ignored - task already in progress', 'task_id': original_task_id}
+        
         try:
             from src.core.task_manager import TaskManager, TaskStatus
             from src.llm_clients.gemini_cli_client import GeminiCLIError
@@ -961,6 +967,19 @@ class MasterWorkflow:
         Returns:
             Formatted input string for the agent
         """
+        # Special handling for FLF agent to ensure proper context
+        if agent_name == "flf-save":
+            logger.info(f"Preparing input for FLF agent with user prompt: {user_prompt}")
+            
+            # Ensure the user prompt contains the necessary information for FLF workflow
+            # The frontend should have already formatted this as:
+            # "First, clone the repository from {flfUrl}. Then, analyze the field patterns in {flfFolderName} using the Universal Field Analysis Context Guide"
+            
+            # Add explicit instructions for FLF agent if not already present
+            if "clone the repository" not in user_prompt.lower() and "analyze the field patterns" not in user_prompt.lower():
+                # This might be a direct prompt, add context
+                user_prompt = f"{user_prompt}\n\nPlease analyze field patterns using the Universal Field Analysis Context Guide."
+        
         # Build context from previous agents (limit to last 2 agents to keep size down)
         previous_work = ""
         context_keys = [key for key in context.keys() if key.endswith('_output') and key != 'user_prompt']
@@ -1033,7 +1052,9 @@ class MasterWorkflow:
                     'sm': ['.sureai/prd_document.md', '.sureai/tasks_list.md'],
                     'developer': ['.sureai/tasks_list.md', '.sureai/architecture_document.md', '.sureai/tech_stack_document.md'],
                     'devops': ['.sureai/architecture_document.md'],
-                    'tester': ['.sureai/architecture_document.md', 'backend/', 'frontend/']
+                    'tester': ['.sureai/architecture_document.md', 'backend/', 'frontend/'],
+                    # FLF agent no longer needs the context file as it's included directly in the prompt
+                    'flf-save': []
                 }
                 
                 if agent_name in doc_references:
@@ -1077,7 +1098,18 @@ class MasterWorkflow:
             sequential_docs,
             agent_instructions
         ]
-        return "\n".join([s for s in input_sections if s])
+        final_input = "\n".join([s for s in input_sections if s])
+        
+        # Log the complete prompt for debugging
+        logger.info(f"📝 Complete prompt for {agent_name} (length: {len(final_input)} characters)")
+        if agent_name == "flf-save":
+            # For FLF agent, log the full prompt for debugging
+            logger.info(f"📝 FLF Agent Complete Prompt:\n{final_input}")
+        else:
+            # For other agents, log first 2000 characters
+            logger.info(f"📝 Prompt preview: {final_input[:2000]}{'...' if len(final_input) > 2000 else ''}")
+        
+        return final_input
 
     async def _save_agent_output(self, task_id: str, agent_name: str, output: str) -> str:
         """
@@ -1211,7 +1243,7 @@ class MasterWorkflow:
                 'error': str(e)
             }
     
-    def _handle_quota_exhaustion(self, agent_name: str, error_message: str, context: Dict[str, Any] = None) -> bool:
+    def _handle_quota_exhaustion(self, agent_name: str, error_message: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """
         Handle quota exhaustion by attempting key rotation
         
@@ -1225,6 +1257,16 @@ class MasterWorkflow:
         """
         try:
             from src.routes.bmad_api import gemini_cli_client
+            
+            # Check if gemini_cli_client is available
+            if gemini_cli_client is None:
+                self._handle_cli_log("ERROR", f"❌ Gemini CLI client not available for key rotation")
+                return False
+                
+            # Check if api_key_manager is available
+            if gemini_cli_client.api_key_manager is None:
+                self._handle_cli_log("ERROR", f"❌ API key manager not available for key rotation")
+                return False
             
             # Get current key status before rotation
             current_status = gemini_cli_client.api_key_manager.get_key_status()
@@ -1288,8 +1330,8 @@ class MasterWorkflow:
         }
     
     async def _execute_workflow3_sequential(self, task_id: str, user_prompt: str, context: Dict[str, Any], 
-                                          custom_prompts: Dict[str, str] = None, per_agent_models: List[str] = None, 
-                                          per_agent_temperatures: List[Optional[float]] = None, per_agent_clis: List[str] = None) -> Dict[str, Any]:
+                                          custom_prompts: Optional[Dict[str, str]] = None, per_agent_models: Optional[List[str]] = None, 
+                                          per_agent_temperatures: Optional[List[Optional[float]]] = None, per_agent_clis: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Execute combined workflow as sequential subworkflows
         
@@ -1298,13 +1340,19 @@ class MasterWorkflow:
           Phase 2: Execution Phase (Gemini) - sm → developer → devops
         
         For 'io8 Default':
-          Phase 1: io8 Plan (SureCLI) - io8project_builder → io8directory_structure → io8codermaster → io8analyst → io8architect → io8pm
+          Phase 1: io8 Plan (SureCLI) - io8_mcp_project → io8directory_structure → io8codermaster → io8analyst → io8architect → io8pm
           Phase 2: io8 Develop (Gemini) - io8sm → io8developer
           Phase 3: io8 Deploy (Gemini) - io8devops
         """
         try:
             from src.core.task_manager import TaskManager, TaskStatus
             task_manager = TaskManager()
+            
+            # Provide default values for optional parameters
+            custom_prompts = custom_prompts or {}
+            per_agent_models = per_agent_models or []
+            per_agent_temperatures = per_agent_temperatures or []
+            per_agent_clis = per_agent_clis or []
             
             # Determine workflow by name from DB if available
             workflow_name = None
@@ -1318,13 +1366,18 @@ class MasterWorkflow:
 
             # Define subworkflows
             if workflow_name in ['io8 Default', 'io8 Plan', 'io8plan']:
-                # Ensure io8project_builder runs first in planning and uses Gemini CLI
-                planning_agents = ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm']
+                # Ensure io8_mcp_project runs first in planning and uses Gemini CLI
+                planning_agents = ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm']
                 development_agents = ['io8sm', 'io8developer']
                 deployment_agents = ['io8devops']
+                # Define these variables to avoid "possibly unbound" errors
+                execution_agents = []
             else:
                 planning_agents = ['directory_structure', 'io8codermaster', 'analyst', 'architect', 'pm']
                 execution_agents = ['sm', 'developer', 'devops']
+                # Define these variables to avoid "possibly unbound" errors
+                development_agents = []
+                deployment_agents = []
             
             # Check if this is a resume operation by looking at task current agent
             current_agent = None
@@ -1593,9 +1646,9 @@ class MasterWorkflow:
             return {'status': 'failed', 'error': str(e)}
     
     async def _execute_workflow_phase(self, task_id: str, user_prompt: str, context: Dict[str, Any], 
-                                    agents: List[str], custom_prompts: Dict[str, str] = None, 
-                                    per_agent_models: List[str] = None, per_agent_temperatures: List[Optional[float]] = None, 
-                                    per_agent_clis: List[str] = None, phase_name: str = "", phase_number: int = 1) -> Dict[str, Any]:
+                                    agents: List[str], custom_prompts: Optional[Dict[str, str]] = None, 
+                                    per_agent_models: Optional[List[str]] = None, per_agent_temperatures: Optional[List[Optional[float]]] = None, 
+                                    per_agent_clis: Optional[List[str]] = None, phase_name: str = "", phase_number: int = 1) -> Dict[str, Any]:
         """
         Execute a single phase of workflow3
         
@@ -1618,13 +1671,20 @@ class MasterWorkflow:
             from src.core.task_manager import TaskManager, TaskStatus
             task_manager = TaskManager()
             
+            # Provide default values for optional parameters
+            custom_prompts = custom_prompts or {}
+            per_agent_models = per_agent_models or []
+            per_agent_temperatures = per_agent_temperatures or []
+            per_agent_clis = per_agent_clis or []
+            
             # Align arrays to phase length
-            phase_models = per_agent_models[:len(agents)] if per_agent_models else [None] * len(agents)
-            phase_temperatures = per_agent_temperatures[:len(agents)] if per_agent_temperatures else [None] * len(agents)
-            phase_clis = per_agent_clis[:len(agents)] if per_agent_clis else ['surecli' if phase_number == 1 else 'gemini'] * len(agents)
-            # Enforce gemini CLI for io8project_builder
+            phase_models = list(per_agent_models[:len(agents)]) if per_agent_models else [None] * len(agents)
+            phase_temperatures = list(per_agent_temperatures[:len(agents)]) if per_agent_temperatures else [None] * len(agents)
+            phase_clis = list(per_agent_clis[:len(agents)]) if per_agent_clis else ['surecli' if phase_number == 1 else 'gemini'] * len(agents)
+            # Enforce gemini CLI for io8_mcp_project
+            phase_clis = [cli for cli in phase_clis]  # Convert to list
             for idx, name in enumerate(agents):
-                if name == 'io8project_builder':
+                if name == 'io8_mcp_project':
                     phase_clis[idx] = 'gemini'
             
             # Pad arrays if needed
@@ -1647,8 +1707,8 @@ class MasterWorkflow:
                     requested_model = phase_models[i] if i < len(phase_models) else None
                     requested_temperature = phase_temperatures[i] if i < len(phase_temperatures) else None
                     agent_cli = phase_clis[i] if i < len(phase_clis) else ('surecli' if phase_number == 1 else 'gemini')
-                    if agent_name == 'io8project_builder' and agent_cli != 'gemini':
-                        self._handle_cli_log("WARNING", "io8project_builder requires Gemini CLI; overriding to 'gemini'")
+                    if agent_name == 'io8_mcp_project' and agent_cli != 'gemini':
+                        self._handle_cli_log("WARNING", "io8_mcp_project requires Gemini CLI; overriding to 'gemini'")
                         agent_cli = 'gemini'
                     
                     start_progress = int((i / len(agents)) * 100)

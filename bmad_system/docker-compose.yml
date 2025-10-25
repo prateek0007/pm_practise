@@ -22,6 +22,7 @@ services:
       - ZITI_PWD=zitiadminpw
       - ZROK_ADMIN_TOKEN=zroktoken
     volumes:
+      - ./bmad_system:/app/bmad_system
       - bmad_data:/tmp/bmad_output
       - bmad_logs:/tmp/bmad_logs
       - bmad_uploads:/tmp/bmad_uploads

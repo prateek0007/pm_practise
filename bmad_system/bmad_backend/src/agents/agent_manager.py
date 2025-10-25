@@ -170,10 +170,10 @@ class AgentManager:
                     "description": "Facilitates agile processes and team coordination (io8)",
                     "file": "io8sm.chatmode.md"
                 },
-                "io8project_builder": {
-                    "display_name": "io8 Project Builder",
-                    "description": "Prepares base project scaffolding and builder plan (io8)",
-                    "file": "io8project_builder.chatmode.md"
+                "io8_mcp_project": {
+                    "display_name": "io8 MCP Project",
+                    "description": "Prepares base project scaffolding and builder plan (io8) - Single execution only",
+                    "file": "io8_mcp_project.chatmode.md"
                 },
                 "requirement_builder": {
                     "display_name": "Requirement Builder",

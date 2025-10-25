@@ -315,104 +315,23 @@ class JobProService {
     
     this[lastSubmitKey] = now;
     
-    // Split ONLY if selected workflow is a combined workflow
+    // Execute complete workflow in a single call - no splitting
     const combinedType = await this._getCombinedWorkflowType(workflowId);
     if (combinedType) {
-      if (combinedType === 'io8') {
-        // io8 workflows: Split into 3 phases
-        const splitMarker = 'io8pm';
-        const splitIndex = workflowSequence.indexOf(splitMarker);
-        const planningSeq = workflowSequence.slice(0, splitIndex + 1);
-        const remainingSeq = workflowSequence.slice(splitIndex + 1);
-        
-        // Find development/deployment split point for io8
-        const developmentEndIndex = remainingSeq.findIndex(agent => agent === 'io8devops');
-        const developmentSeq = developmentEndIndex >= 0 ? remainingSeq.slice(0, developmentEndIndex) : remainingSeq;
-        const deploymentSeq = developmentEndIndex >= 0 ? remainingSeq.slice(developmentEndIndex) : [];
+      // Execute the complete workflow sequence in a single call
+      const ref = this.generateRef();
+      const payload = {
+        prompt: prompt,
+        workflow_id: workflowId || null,
+        workflow_sequence: workflowSequence || null,
+        agent_specific_prompts: agentSpecificPrompts || null,
+        ...baseProjectData
+      };
 
-        const ref1 = this.generateRef();
-        const payload1 = {
-          prompt: prompt,
-          workflow_id: workflowId || null,
-          workflow_sequence: planningSeq,
-          agent_specific_prompts: agentSpecificPrompts || null,
-          phase: 'planning',
-          ...baseProjectData
-        };
-        const jobKey1 = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref1}`;
-        localStorage.setItem(jobKey1, JSON.stringify({ payload: payload1, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
-        const firstResult = await this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref1, payload1);
+      const jobKey = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref}`;
+      localStorage.setItem(jobKey, JSON.stringify({ payload: payload, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
 
-        const ref2 = this.generateRef();
-        const payload2 = {
-          prompt: prompt,
-          workflow_id: workflowId || null,
-          workflow_sequence: developmentSeq,
-          agent_specific_prompts: agentSpecificPrompts || null,
-          phase: 'development'
-        };
-        const jobKey2 = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref2}`;
-        localStorage.setItem(jobKey2, JSON.stringify({ payload: payload2, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
-        await new Promise(r => setTimeout(r, 2500));
-        const secondResult = await this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref2, payload2);
-
-        // Only create deployment job if we have deployment sequence
-        let thirdResult = { success: true };
-        if (deploymentSeq.length > 0) {
-          const ref3 = this.generateRef();
-          const payload3 = {
-            prompt: prompt,
-            workflow_id: workflowId || null,
-            workflow_sequence: deploymentSeq,
-            agent_specific_prompts: agentSpecificPrompts || null,
-            phase: 'deployment'
-          };
-          const jobKey3 = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref3}`;
-          localStorage.setItem(jobKey3, JSON.stringify({ payload: payload3, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
-          await new Promise(r => setTimeout(r, 2500));
-          thirdResult = await this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref3, payload3);
-        }
-
-        return firstResult.success && secondResult.success && thirdResult.success
-          ? { success: true, message: 'Task queued via JobPro (3 phases: planning → development → deployment)' }
-          : { success: false, error: (firstResult.error || secondResult.error || thirdResult.error || 'Failed to queue one of the phases') };
-      } else {
-        // Legacy workflows: Split into 2 phases
-        const splitMarker = 'pm';
-        const splitIndex = workflowSequence.indexOf(splitMarker);
-        const planningSeq = workflowSequence.slice(0, splitIndex + 1);
-        const executionSeq = workflowSequence.slice(splitIndex + 1);
-
-        const ref1 = this.generateRef();
-        const payload1 = {
-          prompt: prompt,
-          workflow_id: workflowId || null,
-          workflow_sequence: planningSeq,
-          agent_specific_prompts: agentSpecificPrompts || null,
-          phase: 'planning',
-          ...baseProjectData
-        };
-        const jobKey1 = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref1}`;
-        localStorage.setItem(jobKey1, JSON.stringify({ payload: payload1, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
-        const firstResult = await this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref1, payload1);
-
-        const ref2 = this.generateRef();
-        const payload2 = {
-          prompt: prompt,
-          workflow_id: workflowId || null,
-          workflow_sequence: executionSeq,
-          agent_specific_prompts: agentSpecificPrompts || null,
-          phase: 'execution'
-        };
-        const jobKey2 = `${JOBPRO_CONFIG.STORAGE_PREFIX}task_${ref2}`;
-        localStorage.setItem(jobKey2, JSON.stringify({ payload: payload2, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, status: 'queued' }));
-        await new Promise(r => setTimeout(r, 2500));
-        const secondResult = await this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref2, payload2);
-
-        return firstResult.success && secondResult.success
-          ? { success: true, message: 'Both phases queued via JobPro' }
-          : { success: false, error: (firstResult.error || secondResult.error || 'Failed to queue one of the phases') };
-      }
+      return this.sendToJobPro('/tasks', JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.SUBMIT_TASK, ref, payload);
     }
 
     const ref = this.generateRef();
@@ -456,48 +375,19 @@ class JobProService {
   async rerunWorkflow(taskId, userPrompt, workflowId, workflowSequence = null, baseProjectData = {}) {
     const combinedType = await this._getCombinedWorkflowType(workflowId);
     if (combinedType) {
-      const splitMarker = combinedType === 'io8' ? 'io8pm' : 'pm';
-      const splitIndex = workflowSequence.indexOf(splitMarker);
-      const planningSeq = workflowSequence.slice(0, splitIndex + 1);
-      const executionSeq = workflowSequence.slice(splitIndex + 1);
-
-      // Phase 1
-      const ref1 = this.generateRef();
-      const payload1 = {
+      // Execute the complete workflow sequence in a single call
+      const ref = this.generateRef();
+      const payload = {
         user_prompt: userPrompt,
         workflow_id: workflowId || undefined,
-        workflow_sequence: planningSeq,
-        phase: 'planning',
+        workflow_sequence: workflowSequence || undefined,
         ...baseProjectData
       };
-      const jobKey1 = `${JOBPRO_CONFIG.STORAGE_PREFIX}rerun_${ref1}`;
-      localStorage.setItem(jobKey1, JSON.stringify({ payload: payload1, taskId: taskId, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, status: 'queued' }));
-      const firstResult = await this.sendToJobPro(`/tasks/${taskId}/reexecute`, JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, ref1, payload1);
 
-      // Wait for phase 1 to complete before queuing phase 2
-      try {
-        await this._waitForTaskCompletion(taskId, 1000 * 60 * 60); // up to 60 minutes
-      } catch (e) {
-        // If wait failed (timeout/failed), surface error
-        return { success: false, error: e.message || 'Phase 1 did not complete' };
-      }
+      const jobKey = `${JOBPRO_CONFIG.STORAGE_PREFIX}rerun_${ref}`;
+      localStorage.setItem(jobKey, JSON.stringify({ payload: payload, taskId: taskId, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, status: 'queued' }));
 
-      // Phase 2
-      const ref2 = this.generateRef();
-      const payload2 = {
-        user_prompt: userPrompt,
-        workflow_id: workflowId || undefined,
-        workflow_sequence: executionSeq,
-        phase: 'execution'
-        // Note: base project data is only needed for phase 1 (planning)
-      };
-      const jobKey2 = `${JOBPRO_CONFIG.STORAGE_PREFIX}rerun_${ref2}`;
-      localStorage.setItem(jobKey2, JSON.stringify({ payload: payload2, taskId: taskId, timestamp: new Date().toISOString(), type: JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, status: 'queued' }));
-      const secondResult = await this.sendToJobPro(`/tasks/${taskId}/reexecute`, JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, ref2, payload2);
-
-      return firstResult.success && secondResult.success
-        ? { success: true, message: 'Both phases queued via JobPro' }
-        : { success: false, error: (firstResult.error || secondResult.error || 'Failed to queue one of the phases') };
+      return this.sendToJobPro(`/tasks/${taskId}/reexecute`, JOBPRO_CONFIG.METHODS.POST, JOBPRO_CONFIG.JOB_TYPES.RERUN_WORKFLOW, ref, payload);
     }
 
     const ref = this.generateRef();

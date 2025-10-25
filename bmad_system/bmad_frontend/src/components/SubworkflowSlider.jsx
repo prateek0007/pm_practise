@@ -24,7 +24,7 @@ const SubworkflowSlider = ({
         ? {
             name: 'io8 Plan',
             description: 'io8 planning phase using SureCLI (Directory → PM)',
-            agents: ['io8project_builder', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'],
+            agents: ['io8_mcp_project', 'io8directory_structure', 'io8codermaster', 'io8analyst', 'io8architect', 'io8pm'],
             cli: 'surecli'
           }
         : {

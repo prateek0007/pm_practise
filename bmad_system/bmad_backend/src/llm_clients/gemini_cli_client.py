@@ -223,6 +223,10 @@ class GeminiCLIClient:
                     context_str += f"{key}: {value}\n"
                 full_message = context_str + "\n\n=== MESSAGE ===\n" + message
             
+            # Log the complete message being sent (first 2000 characters)
+            self._log_cli_output("DEBUG", f"📝 Complete message being sent (length: {len(full_message)} characters)")
+            self._log_cli_output("DEBUG", f"📝 Message preview: {full_message[:2000]}{'...' if len(full_message) > 2000 else ''}")
+            
             # Determine overall timeout for async guard
             if agent_name:
                 timeout_config = get_agent_timeout_config(agent_name)
@@ -314,6 +318,10 @@ class GeminiCLIClient:
                     context_str += f"{key}: {value}\n"
                 full_prompt = context_str + "\n\n=== PROMPT ===\n" + prompt
             
+            # Log the complete prompt being sent (first 2000 characters)
+            self._log_cli_output("DEBUG", f"📝 Complete prompt being sent (length: {len(full_prompt)} characters)")
+            self._log_cli_output("DEBUG", f"📝 Prompt preview: {full_prompt[:2000]}{'...' if len(full_prompt) > 2000 else ''}")
+            
             # Generate response and track timing
             start_time = time.time()
             self._log_cli_output("INFO", "⏳ Generating response...")
@@ -402,6 +410,7 @@ class GeminiCLIClient:
         # Get timeout configuration based on agent name
         if agent_name:
             timeout_config = get_agent_timeout_config(agent_name)
+            self._log_cli_output("DEBUG", f"Agent timeout config for {agent_name}: {timeout_config}")
             max_retries = timeout_config.get('max_retries', max_retries)
             base_timeout = timeout_config.get('timeout', 300)
             retry_timeout = timeout_config.get('retry_timeout', base_timeout)
@@ -440,6 +449,7 @@ class GeminiCLIClient:
                 timeout_duration = base_timeout if attempt == 0 else retry_timeout
                 remaining_overall = overall_cap - elapsed
                 timeout_duration = max(5, min(timeout_duration, int(remaining_overall)))
+                self._log_cli_output("DEBUG", f"Timeout duration for attempt {attempt + 1}: {timeout_duration} seconds")
                 # Idle timeout budget from config (if available)
                 try:
                     idle_timeout = get_agent_timeout_config(agent_name or "").get('idle', 120)
@@ -449,6 +459,7 @@ class GeminiCLIClient:
                 # 1) Prefer STDIN mode to minimize sandbox warnings
                 stdin_cmd = ['gemini', '--yolo', '--model', self.model_name] + _build_include_dirs_args() + (self.mcp_args or [])
                 self._log_cli_output("DEBUG", f"🔧 Executing (stdin mode): {' '.join(stdin_cmd)} (Attempt {attempt + 1}/{max_retries + 1})")
+                self._log_cli_output("DEBUG", f"Timeout being passed to _run_cli_with_streaming: {timeout_duration} seconds")
                 stdout_text, stderr_text, return_code = self._run_cli_with_streaming(
                     cmd=stdin_cmd,
                     input_text=prompt,
@@ -493,6 +504,7 @@ class GeminiCLIClient:
                     )
                     
                     try:
+                        self._log_cli_output("DEBUG", f"Timeout being passed to process.communicate: {timeout_duration} seconds")
                         stdout, stderr = process.communicate(timeout=timeout_duration)
                         return_code = process.returncode
                     except subprocess.TimeoutExpired:
