@@ -1,0 +1,18 @@
+# Python DB / env files
+*.db
+*.env
+
+# Logs / temporary files
+*.log
+tmp/
+*.bak
+
+# Docker / system
+.env
+*.swp
+*.DS_Store
+
+# Shell / scripts
+*.sh
+*.ps1
+
